@@ -1,0 +1,550 @@
+---
+title: "STAT154_PROJ2"
+author: "Grace Wang, Tiantian Fu"
+date: "4/23/2019"
+output: pdf_document
+---
+1. Data Collection
+```{r}
+library(ggplot2)
+library(gridExtra)
+library(dplyr)
+library(caret)
+library(MASS)
+library(factoextra)
+library(ggfortify)
+library(e1071)
+library(corrplot)
+library(RColorBrewer)
+library(pROC)
+library(randomForest)
+library(class)
+library(RVAideMemoire)
+```
+
+b)
+```{r}
+image1 = read.table("~/desktop/image_data/image1.txt")
+colnames(image1) = c("Y","X","Expert","NDAI","SD","CORR","DF","CF","BF","AF","AN")
+image2 = read.table("~/desktop/image_data/image2.txt")
+colnames(image2) = c("Y","X","Expert","NDAI","SD","CORR","DF","CF","BF","AF","AN")
+image3 = read.table("~/desktop/image_data/image3.txt")
+colnames(image3) = c("Y","X","Expert","NDAI","SD","CORR","DF","CF","BF","AF","AN")
+```
+
+```{r}
+image1_cloud = nrow(image1[image1$Expert == 1,])/nrow(image1)
+image1_unlabeled = nrow(image1[image1$Expert == 0,])/nrow(image1)
+image1_nocloud = nrow(image1[image1$Expert == -1,])/nrow(image1)
+
+image2_cloud = nrow(image2[image2$Expert == 1,])/nrow(image2)
+image2_unlabeled = nrow(image2[image2$Expert == 0,])/nrow(image2)
+image2_nocloud = nrow(image2[image2$Expert == -1,])/nrow(image2)
+
+image3_cloud = nrow(image3[image3$Expert ==1,])/nrow(image3)
+image3_unlabeled = nrow(image3[image3$Expert == 0,])/nrow(image3)
+image3_nocloud = nrow(image3[image3$Expert == -1,])/nrow(image3)
+
+summary_pixels = matrix(c(image1_cloud,image1_unlabeled,image1_nocloud,image2_cloud,image2_unlabeled,image2_nocloud,image3_cloud,image3_unlabeled,image3_nocloud),nrow = 3,ncol = 3, byrow = TRUE)
+
+colnames(summary_pixels) = c("cloud","unlabeled","clear")
+rownames(summary_pixels) = c("image1","image2","image3")
+summary_pixels
+
+ggplot(image1)+geom_point(aes(x = X, y = Y,colour = Expert))+ggtitle("Expert labels on X and Y coordinates in Image1")
+ggplot(image2)+geom_point(aes(x = X, y = Y,colour = Expert))+ggtitle("Expert labels on X and Y coordinates in Image2")
+ggplot(image3)+geom_point(aes(x = X, y = Y,colour = Expert))+ggtitle("Expert labels on X and Y coordinates in Image3")
+
+
+```
+c)
+```{r}
+#take out the unlabeled 
+image1 = image1[image1$Expert!=0,]
+image2 = image2[image2$Expert!=0,]
+image3 = image3[image3$Expert!=0,]
+
+#pair-wise relationship between the features themselves
+par(mfrow = c(1, 3))
+plot(image1$CORR,image1$NDAI,col = image1$Expert+3)
+plot(image2$CORR,image2$NDAI,col = image2$Expert+3)
+plot(image3$CORR,image3$NDAI,col = image3$Expert+3)
+
+par(mfrow = c(1, 3))
+plot(image1$CORR,image1$SD,col = image1$Expert+3)
+plot(image2$CORR,image2$SD,col = image2$Expert+3)
+plot(image3$CORR,image3$SD,col = image3$Expert+3)
+
+
+par(mfrow = c(1, 3))
+plot(image1$NDAI,image1$SD,col = image1$Expert+3)
+plot(image2$NDAI,image2$SD,col = image2$Expert+3)
+plot(image3$NDAI,image3$SD,col = image3$Expert+3)
+
+#the relationship between the expert labels with the individual features.
+g1 = ggplot(image1)+geom_boxplot(aes(x = Expert,y = NDAI,group = Expert))
+g2 = ggplot(image1)+geom_boxplot(aes(x = Expert,y = SD,group = Expert))
+g3 = ggplot(image1)+geom_boxplot(aes(x = Expert,y = CORR,group = Expert))
+grid.arrange(g1,g2,g3,nrow =2)
+
+g4 = ggplot(image1)+geom_boxplot(aes(x = Expert,y = DF,group = Expert))
+g5 = ggplot(image1)+geom_boxplot(aes(x = Expert,y = CF,group = Expert))
+g6 = ggplot(image1)+geom_boxplot(aes(x = Expert,y = BF,group = Expert))
+g7 = ggplot(image1)+geom_boxplot(aes(x = Expert,y = AF,group = Expert))
+g8 = ggplot(image1)+geom_boxplot(aes(x = Expert,y = AN,group = Expert))
+grid.arrange(g4,g5,nrow =1)
+grid.arrange(g6,g7,g8,nrow =1)
+```
+
+2a. 
+```{r}
+#First way of splitting the data 
+split_grids <- function(xdim,ydim,dat){
+  interval_x = (max(dat$X)-min(dat$X))/xdim
+  interval_y = (max(dat$Y)-min(dat$Y))/ydim
+  num = (xdim*ydim)
+  pointx1 = min(dat$X)
+  pointy1 = min(dat$Y)
+
+  k = 1
+  n_row = 0
+  grid = list()
+
+  while(k<= num){
+    for (j in 1:(ydim)){
+      for (i in 1:(xdim)){
+        if ( i!=xdim && j ==ydim) {
+         grid[[k]] = dat[(dat$X %in% seq(round(pointx1+(i-1)*interval_x), round(pointx1+ (i)*interval_x-1)))
+                            & (dat$Y %in% seq(round(pointy1+(j-1)*interval_y),round(pointy1+ (j)*interval_y))),]
+
+        } else if(i == xdim && j!= ydim) {
+         grid[[k]] = dat[(dat$X %in% seq(round(pointx1+(i-1)*interval_x),round(pointx1+ (i)*interval_x)))
+                             & (dat$Y %in% seq(round(pointy1+(j-1)*interval_y),round(pointy1+ (j)*interval_y-1))),]
+         
+        } else if(i == xdim && j== ydim) {
+           grid[[k]] = dat[(dat$X %in% seq(round(pointx1+(i-1)*interval_x),round(pointx1+ (i)*interval_x)))
+                              & (dat$Y %in% seq(round(pointy1+(j-1)*interval_y),round(pointy1+ (j)*interval_y))),]
+           
+        } else if (i != xdim && j!= ydim){
+        grid[[k]] = dat[(dat$X %in% seq(round(pointx1+(i-1)*interval_x),round(pointx1+ (i)*interval_x-1)) )
+                           & (dat$Y %in% seq(round(pointy1+(j-1)*interval_y),round(pointy1+ (j)*interval_y-1))),]
+        }
+        n_row = n_row+nrow(grid[[k]])
+        k = k+1
+      }
+    }
+  }
+   print(n_row)
+  return(grid)
+}
+```
+
+
+```{r}
+#split the data into 5*5 grids
+set.seed(123)
+grid_image1 = split_grids(5,5,image1)
+grid_image2 = split_grids(5,5,image2)
+grid_image3 = split_grids(5,5,image3)
+all_grid <- c(grid_image1, grid_image2, grid_image3)
+
+
+split1 <- function(grid_image1){
+train_set1<-list()
+val_set1 <- list()
+test_set1<-list()
+
+n_grid = length(grid_image1)
+train_size = 3 / 5 * n_grid
+val_size = 1 / 5 * n_grid
+test_size = 1 / 5 * n_grid
+
+total_id = 1:n_grid
+trainval_id = sample(total_id,train_size+val_size,replace = FALSE)
+test_id = total_id[-trainval_id]
+train_id =  sample(trainval_id,train_size,replace = FALSE)
+val_id = trainval_id[trainval_id %in% train_id == FALSE]
+
+for (i in 1:length(train_id)) {
+  train_set1[[i]]<- grid_image1[[train_id[i]]]
+}
+
+for (i in 1:length(test_id)) {
+  test_set1[[i]]<-grid_image1[[test_id[i]]]
+}
+
+for (i in 1:length(val_id)) {
+  val_set1[[i]]<-grid_image1[[val_id[i]]]
+}
+mylist = list(train_set1,val_set1,test_set1)
+return(mylist)
+}
+
+train_set1 = split1(grid_image1)[[1]]
+val_set1 = split1(grid_image1)[[2]]
+test_set1 = split1(grid_image1)[[3]]
+
+train_set2 = split1(grid_image2)[[1]]
+val_set2 = split1(grid_image2)[[2]]
+test_set2 = split1(grid_image2)[[3]]
+
+train_set3 = split1(grid_image3)[[1]]
+val_set3 = split1(grid_image3)[[2]]
+test_set3 = split1(grid_image3)[[3]]
+
+train_set<-cbind(train_set1,train_set2,train_set3)
+train_set = bind_rows(train_set)
+test_set<-cbind(test_set1,test_set2,test_set3)
+test_set =bind_rows(test_set)
+val_set<-cbind(val_set1,val_set2,val_set3)
+val_set<-bind_rows(val_set)
+```
+
+
+
+```{r}
+#Second way of splitting data.
+set.seed(123)
+split2 <- function(image1){
+set.seed(123)
+#all_image<-rbind(image1,image2,image3)
+testvalSize <- floor(nrow(image1)*2/5)
+
+testvalIndex <- sample(seq_len(nrow(image1)), size = testvalSize)
+
+testvalset_way_2 <- image1[testvalIndex, ]
+train_way_2 <- image1[-testvalIndex,]
+
+testIndex<-sample(testvalIndex,size=floor(nrow(image1)*1/5),replace = FALSE)
+test_way_2<- image1[testIndex,]
+
+val_way_2<- testvalset_way_2[testvalIndex %in% testIndex == FALSE,]
+mylist = list(train_way_2,val_way_2,test_way_2)
+return(mylist)
+}
+
+train_rand_1 = split2(image1)[[1]]
+val_rand_1  = split2(image1)[[2]]
+test_rand_1 = split2(image1)[[3]]
+
+train_rand_2 = split2(image2)[[1]]
+val_rand_2  = split2(image2)[[2]]
+test_rand_2 = split2(image2)[[3]]
+
+train_rand_3 = split2(image3)[[1]]
+val_rand_3  = split2(image3)[[2]]
+test_rand_3 = split2(image3)[[3]]
+
+train_way_2<-rbind(train_rand_1,train_rand_2,train_rand_3)
+test_way_2<-rbind(test_rand_1,test_rand_2,test_rand_3)
+val_way_2<-rbind(val_rand_1,val_rand_2,val_rand_3)
+
+```
+
+
+2b.
+
+```{r}
+# val_set$classifier <- -1
+# test_set$classifier <- -1
+mean(val_set$Expert == -1)
+mean(test_set$Expert == -1)
+#When most of the points in the validation set and test set are -1, the classifier will have high accuracy. 
+```
+
+2c.
+```{r}
+
+corr_images <-cor(images[,features])
+features[order(abs(corr_images[,1]),decreasing=TRUE)[2:4]]
+corrplot(corr_images, type="upper", order="hclust",
+         col=brewer.pal(n=8, name="RdYlBu"))
+#After using correlation function, we can tell that NDAI,CORR,AF are the three features that relates the Expert Label the most And we can also tell by looking at the correlation plot.
+```
+
+2d.
+```{r}
+set.seed(123)
+loss <- function(y_hat,y_true){
+  return (mean(y_hat!=y_true))
+}
+
+CVgeneric <- function(classifier,tr_feature,tr_label,K,loss){
+  folds = createFolds(tr_label,K)
+  loss_rate = c()
+  modelList = list()
+  dat = cbind(tr_feature,tr_label)
+  
+  for (i in 1:length(folds)){
+  # val_set = dat[folds[[i]],]
+  # train_set = dat[-folds[[i]],]
+  # y_true = val_set$tr_label
+
+    val_set = tr_feature[folds[[i]], ]
+    training_set = tr_feature[-folds[[i]], ]
+    y_lab = tr_label[-folds[[i]]]
+    y_true <- tr_label[folds[[i]]]
+    
+  currFormula <- as.formula(paste("tr_label","~",paste(colnames(tr_feature), collapse = "+"), sep = ""))
+  func = get(classifier)
+  
+  if (classifier %in% c("lda","qda")){
+    modelList <- func(currFormula,data = dat)
+    y_hat = predict(modelList,newdata = val_set)$class
+
+  }
+  else if(classifier == "glm"){
+  modelList <- glm(currFormula,data = dat,family=binomial)
+
+  y_hat = predict(modelList,newdata = val_set, type='response')
+  y_hat = ifelse(y_hat > 0.5,1,-1)
+  }
+
+  else if (classifier == "knn"){
+   #modelList <- func(currFormula,data = training_set,kernel =
+#"linear")
+   y_hat <- knn(training_set, val_set, y_lab, k=350, prob= TRUE)
+  }
+  else if (classifier == "randomForest"){
+  modelList = randomForest(currFormula, data = tr_dat,ntree = 500, importance = TRUE)
+  y_hat <- predict(modelList, newdata = val_set)
+  }
+  
+  loss_rate[i] = loss(y_hat,y_true)
+  }
+  return ((loss_rate))
+}
+```
+
+3a. 
+```{r}
+set.seed(123)
+tr_dat =rbind(train_set,val_set[,1:11])
+feature = c("NDAI","CORR","SD")
+tr_feature = tr_dat[,feature]
+tr_label = as.factor(tr_dat$Expert)
+tr_dat$Expert = tr_label
+K = 5
+
+#way number1 of splitting data
+LR_LDA1<-1-CVgeneric("lda",tr_feature,tr_label,K,loss)
+LR_QDA1<-1-CVgeneric("qda",tr_feature,tr_label,K,loss)
+LR_KNN1<-1-CVgeneric("knn",tr_feature,tr_label,K,loss)
+LR_GLM1<-1-CVgeneric("glm",tr_feature,tr_label,K,loss)
+data.frame("LDA"=LR_LDA1,"QDA"=LR_QDA1,"KNN"=LR_KNN1, "GLM" =LR_GLM1)
+
+#way number2 of splitting data
+tr_dat2 = rbind(train_way_2,val_way_2)
+tr_label2 = as.factor(tr_dat2$Expert)
+tr_feature2 = tr_dat2[,feature]
+
+LR_LDA2<-1-CVgeneric("lda",tr_feature2,tr_label2,K,loss)
+LR_QDA2<-1-CVgeneric("qda",tr_feature2,tr_label2,K,loss)
+LR_KNN2<-1-CVgeneric("knn",tr_feature2,tr_label2,K,loss)
+LR_GLM2<-1-CVgeneric("glm",tr_feature2,tr_label2,K,loss)
+data.frame("LDA"=LR_LDA2,"QDA"=LR_QDA2,"KNN"=LR_KNN2, "GLM" =LR_GLM2)
+
+# model = list()
+# currFormula <- as.formula(paste("Expert","~",paste(colnames(tr_feature), collapse = "+"), sep = ""))
+model <- lda(currFormula,data = tr_dat)
+plot(model)
+mqqnorm(tr_feature2, main = "Multi-normal Q-Q Plot")
+```
+
+ROC
+```{r}
+currFormula <- as.formula(paste("Expert","~",paste(feature, collapse = "+"), sep = ""))
+#glm
+par(pty = "s")
+glm.fit = glm(currFormula,data = tr_dat,family=binomial(link='logit'))
+log_roc = roc(tr_dat$Expert,glm.fit$fitted.values,legacy.axes = TRUE)
+plot(log_roc, print.thres = 0.28,col = "blue")
+
+#lda
+par(new = TRUE, pty = "s")
+lda.fit = lda(currFormula,data = tr_dat)
+y_hat1 = predict(lda.fit,newdata = tr_dat)$class
+lda_roc = roc(tr_dat$Expert, as.numeric(y_hat1),legacy.axes = TRUE)
+plot(lda_roc,col = "red")
+
+#qda
+par(new = TRUE)
+qda.fit = qda(currFormula,data = tr_dat)
+y_hat2 = predict(qda.fit,newdata = tr_dat)$class
+qda_roc = roc(tr_dat$Expert, as.numeric(y_hat2),legacy.axes = TRUE)
+plot(qda_roc,col = "green")
+
+#knn
+par(new = TRUE)
+y_hat3<-knn(tr_dat, test_way_2, tr_dat$Expert, k=350, prob= TRUE)
+knn_roc = roc(test_way_2$Expert, as.numeric(y_hat3),legacy.axes = TRUE)
+knn_roc$thresholds[2]
+plot(knn_roc,col = "yellow",main="ROC Curves on first way of splitting data")
+legend("bottomright",legend = c("log","lda","qda","knn"),col = c("blue","red","green","yellow"))
+log_roc$auc
+lda_roc$auc
+qda_roc$auc
+knn_roc$auc
+```
+
+
+```{r}
+tr_dat2 = rbind(train_way_2,val_way_2[,1:11])
+tr_label2 = as.factor(tr_dat2$Expert)
+tr_dat2$Expert = as.factor(tr_dat2$Expert)
+tr_feature2 = tr_dat2[,feature]
+#glm
+par(pty = "s")
+glm.fit = glm(currFormula,data = tr_dat2,family=binomial(link='logit'))
+log_roc = roc(tr_dat2$Expert,glm.fit$fitted.values,legacy.axes = TRUE)
+plot(log_roc, print.thres = 0.28,col = "blue")
+
+#lda
+par(new = TRUE, pty = "s")
+lda.fit = lda(currFormula,data = tr_dat2)
+y_hat1 = predict(lda.fit,newdata = tr_dat2)$class
+lda_roc = roc(tr_dat2$Expert, as.numeric(y_hat1),legacy.axes = TRUE)
+plot(lda_roc,col = "red")
+
+#qda
+par(new = TRUE)
+qda.fit = qda(currFormula,data = tr_dat2)
+y_hat2 = predict(qda.fit,newdata = tr_dat2)$class
+qda_roc = roc(tr_dat2$Expert, as.numeric(y_hat2),legacy.axes = TRUE)
+plot(qda_roc,col = "green")
+
+#knn
+par(new = TRUE)
+y_hat3<-knn(tr_dat2, test_way_2, tr_dat2$Expert, k=350, prob= TRUE)
+knn_roc = roc(test_way_2$Expert, as.numeric(y_hat3),legacy.axes = TRUE)
+knn_roc$thresholds[2]
+plot(knn_roc,col = "yellow",main="ROC Curves on second way of splitting data")
+legend("bottomright",legend = c("log","lda","qda","knn"),col = c("blue","red","green","yellow"))
+log_roc$auc
+lda_roc$auc
+qda_roc$auc
+knn_roc$auc
+```
+
+4. Diagnostics 
+a)
+```{r}
+#split 1 method 
+diag_plots <- function(train_set,val_set,test_set,modelList,for_name){
+tr_dat = rbind(train_set,val_set)
+tr_dat = bind_rows(tr_dat)
+tr_dat$Expert = as.factor(tr_dat$Expert)
+test_set = bind_rows(test_set)
+test_set$Expert = as.factor(test_set$Expert)
+
+#convergence 
+count = 1
+accuracy = c()
+trace_range = seq(5000,length(test_set),round(length(test_set)-5000)/80)
+
+for (i in trace_range){
+y_hat = predict(modelList,newdata = test_set[1:i,])
+if(for_name == "glm"){
+y_hat = ifelse(y_hat > 0.5,1,-1)}
+
+y_true <- test_set[1:i,]$Expert
+accuracy[count] = 1 - mean(y_hat!=y_true)
+count = count +1 
+}
+
+
+plot(trace_range,accuracy,main = "Convergence Curve")
+
+#error and fitted diagnostics 
+par(mfrow = c(2, 2))
+plot(modelList)
+}
+modelList <- glm(as.formula(paste("Expert","~",paste(feature, collapse = "+"), sep = "")),data = tr_dat,family=binomial)
+diag_plots(train_set,val_set,test_set,modelList,"glm")
+```
+
+4b)
+```{r}
+mis_plot <- function(train_set1,val_set1,test_set1,feature,image,modelList,for_name){
+train1 = rbind(train_set1,val_set1)
+train1 = bind_rows(train1)
+test1 = bind_rows(test_set1)
+
+train1$Expert = as.factor(train1$Expert)
+test1$Expert = as.factor(test1$Expert)
+currFormula <- as.formula(paste("Expert","~",paste(feature, collapse = "+"), sep = ""))
+
+# patterns of mis errors in X Y coordinate 
+y_pred = predict(modelList,newdata = test1)
+
+if (for_name == "glm"){
+y_pred = ifelse(y_pred > 0.5,1,-1)
+y_pred = as.factor(as.integer(as.vector(y_pred))) 
+}
+
+else if (for_name == "randomForest"){
+y_pred = as.factor(as.integer(as.vector(y_pred)))  
+}
+
+group1 = test1$Expert != y_pred & test1$Expert == -1
+group2 = test1$Expert != y_pred & test1$Expert == 1
+
+if(sum(group1) ==0){
+ g1 = ggplot()+geom_point(aes(x = test1$X[group2], y = test1$Y[group2], colour = "1"))+ggtitle(image) 
+ print(g1)
+}else if (sum(group2) == 0){
+ g1 = ggplot()+geom_point(aes(x = test1$X[group1], y = test1$Y[group1], colour = "-1"))+ggtitle(image)
+print(g1)
+}else {g1 = ggplot()+geom_point(aes(x = test1$X[group1], y = test1$Y[group1], colour = "-1"))+geom_point(aes(x = test1$X[group2], y = test1$Y[group2], colour = "1"))+ggtitle(image)
+print(g1)}
+
+#patterns of mis errors in the range the feature values 
+for (i in 1:length(feature)){
+p1 = ggplot()+geom_histogram(aes(x = test1[,feature[i]]))+ggtitle("frequency of feature in all test data")+xlab(feature[i])
+p2 = ggplot()+geom_histogram(aes(x = test1[c(group1,group2),feature[i]]))+ggtitle("frequency of feature in misclassification data")+xlab(feature[i])
+grid.arrange(p1,p2,top =image )
+}
+}
+
+feature = c("NDAI","CORR","SD")
+modelList <- glm(currFormula,data = tr_dat,family=binomial)
+mis_plot(train_set1,val_set1,test_set1,feature,image = "image1",modelList,"glm")
+mis_plot(train_set2,val_set2,test_set2,feature,image = "image2",modelList,"glm")
+mis_plot(train_set3,val_set3,test_set3,feature,image = "image3",modelList,"glm")
+```
+
+
+
+
+We use "split1" way to get the training, validation and test data.By looking at the X,Y coordinates distribution of the misclassification data, we can see that in image1, most missclassified data are labeled -1 instead of 1(see the blue spots) and they mostly in the X in (0,120) and Y in (0,120) grid. Image2 has the opposite problemm, it mostly mislabeled -1 to 1 and they concentrated at the area of X in (250,350) and Y in (0,50) grid. Image3 has far more missclassiified data that are mislabeled as -1 instead of 1. The distribution is a little bit more spread but mostly in three big areas: X in (50,150), Y in (300,350);X in (180,250), Y in (220,300); X in (250,300), Y in (0,20)
+
+By looking at the histograms of all test data vs. misclassification data, from the distribution we could see that three different images have different specific range of misclassification data. For instance, In image1, the range of NDAI values are specified from 1.3 to 2.1, CORR values are specified from 0.1 to 0.2, AF are specified from 210 to 250...
+
+4c.
+```{r}
+currFormula <- as.formula(paste("Expert","~",paste(feature, collapse = "+"), sep = ""))
+modelList = randomForest(currFormula, data = tr_dat,ntree = 500, importance = TRUE)
+
+  
+diag_plots(train_set,val_set,test_set,modelList,"randomForest")
+
+mis_plot(train_set1,val_set1,test_set1,feature,image = "image1",modelList,"randomForest")
+mis_plot(train_set2,val_set2,test_set2,feature,image = "image2",modelList,"randomForest")
+mis_plot(train_set3,val_set3,test_set3,feature,image = "image3",modelList,"randomForest")
+AR_randomf<-1-CVgeneric("randomForest",tr_feature,tr_label,K,loss)
+
+```
+
+
+d)
+```{r}
+modelList <- glm(as.formula(paste("Expert","~",paste(feature, collapse = "+"), sep = "")),data = tr_dat,family=binomial)
+diag_plots(train_way_2,val_way_2,test_way_2,modelList,"glm")
+mis_plot(train_rand_1,val_rand_1,test_rand_1,feature,image = "image1",modelList,"glm")
+mis_plot(train_rand_2,val_rand_2,test_rand_2,feature,image = "image2",modelList,"glm")
+mis_plot(train_rand_3,val_rand_3,test_rand_3,feature,image = "image3",modelList,"glm")
+```
+Yes. As we change the splitting data method to the random way(split2), the first observation that comes to us is that for each image, the distribution of the missclssification data in the X,Y coordinates becomes messy and more spreaded. As for three features(NDAI,AF and CORR), the ranges of wrong labels also become more spreaded and don't have any specific ranges amoong the whole test data. 
+
+
+
